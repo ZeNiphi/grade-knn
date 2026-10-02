@@ -1,0 +1,58 @@
+# Markdown files
+*.md
+
+# Tests
+test/
+tests/
+__tests__/
+testing/
+*.test.*
+*.spec.*
+test_*.py
+*_test.py
+conftest.py
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+
+# Claude
+.claude/
+CLAUDE.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Local SQLite data
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Vite
+.vite/
+vite.config.js.timestamp-*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.gstack/
