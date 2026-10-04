@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import router as auth_router
 from .config import Settings, load_settings
+from .courses import router as courses_router
 from .database import create_sqlite_engine, get_db
 
 
@@ -33,7 +34,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.frontend_origin],
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
 
@@ -72,5 +73,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "healthy"}
 
     app.include_router(auth_router)
+    app.include_router(courses_router)
 
     return app

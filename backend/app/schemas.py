@@ -64,3 +64,35 @@ class RegisteredStudent(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
+
+
+class CourseWrite(BaseModel):
+    """The editable fields of a course."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    name: str
+
+    @field_validator("code")
+    @classmethod
+    def normalize_course_code(cls, value: str) -> str:
+        code = value.strip().upper()
+        if not code or len(code) > 20:
+            raise ValueError("Course code must be 1-20 characters.")
+        return code
+
+    @field_validator("name")
+    @classmethod
+    def normalize_course_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name or len(name) > 150:
+            raise ValueError("Course name must be 1-150 characters.")
+        return name
+
+
+class CourseResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    is_active: bool
