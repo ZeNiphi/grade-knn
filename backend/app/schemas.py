@@ -118,3 +118,53 @@ class StudentGradeResponse(BaseModel):
     id: int
     course: CourseResponse
     grade: int
+
+
+class HistoricalStudentResponse(BaseModel):
+    id: int
+    generated_key: str | None
+    is_active_for_knn: bool
+    grade_count: int
+
+
+class HistoricalGradeResponse(BaseModel):
+    course: CourseResponse
+    grade: int
+
+
+class HistoricalStudentDetailResponse(HistoricalStudentResponse):
+    grades: list[HistoricalGradeResponse]
+
+
+class AdminStudentResponse(BaseModel):
+    id: int
+    username: str
+    is_active: bool
+    grade_count: int
+
+
+class AdminSummaryResponse(BaseModel):
+    registered_account_count: int
+    active_student_count: int
+    course_count: int
+    active_course_count: int
+    historical_student_count: int
+    active_historical_student_count: int
+    stored_grade_count: int
+
+
+class KNNSettingResponse(BaseModel):
+    k: int
+
+
+class KNNSettingWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    k: StrictInt
+
+    @field_validator("k")
+    @classmethod
+    def validate_k(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("k must be a positive integer.")
+        return value

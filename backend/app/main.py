@@ -11,11 +11,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .admin_dashboard import router as admin_dashboard_router
+from .admin_students import router as admin_students_router
 from .auth import router as auth_router
 from .config import Settings, load_settings
 from .courses import router as courses_router
 from .database import create_sqlite_engine, get_db
 from .grades import router as grades_router
+from .historical_students import router as historical_students_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -59,6 +62,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, error: RequestValidationError):
         fields = sorted({str(item["loc"][-1]) for item in error.errors()})
+        if "k" in fields:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "INVALID_K",
+                    "message": "k must be a positive integer.",
+                },
+            )
         if "grade" in fields:
             return JSONResponse(
                 status_code=422,
@@ -82,7 +93,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "healthy"}
 
     app.include_router(auth_router)
+    app.include_router(admin_dashboard_router)
+    app.include_router(admin_students_router)
     app.include_router(courses_router)
     app.include_router(grades_router)
+    app.include_router(historical_students_router)
 
     return app
