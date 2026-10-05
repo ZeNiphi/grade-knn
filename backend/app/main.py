@@ -15,6 +15,7 @@ from .auth import router as auth_router
 from .config import Settings, load_settings
 from .courses import router as courses_router
 from .database import create_sqlite_engine, get_db
+from .grades import router as grades_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -58,6 +59,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, error: RequestValidationError):
         fields = sorted({str(item["loc"][-1]) for item in error.errors()})
+        if "grade" in fields:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "code": "INVALID_GRADE",
+                    "message": "Grade must be an integer from 0 to 100.",
+                },
+            )
         return JSONResponse(
             status_code=422,
             content={
@@ -74,5 +83,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(courses_router)
+    app.include_router(grades_router)
 
     return app

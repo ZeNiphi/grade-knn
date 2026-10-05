@@ -43,6 +43,16 @@ def course_delete_blocked_response() -> JSONResponse:
     )
 
 
+def course_inactive_error() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "COURSE_INACTIVE",
+            "message": "New grades cannot be added to an inactive course.",
+        },
+    )
+
+
 def get_course_or_404(db: Session, course_id: int) -> Course:
     course = db.get(Course, course_id)
     if course is None:

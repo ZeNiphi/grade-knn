@@ -3,7 +3,7 @@
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
 
 USERNAME_PATTERN = re.compile(r"[a-z0-9_]+")
 MIN_USERNAME_LENGTH = 3
@@ -96,3 +96,25 @@ class CourseResponse(BaseModel):
     code: str
     name: str
     is_active: bool
+
+
+class GradeWrite(BaseModel):
+    """A grade submitted for a course."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    course_id: StrictInt
+    grade: StrictInt
+
+    @field_validator("grade")
+    @classmethod
+    def validate_grade(cls, value: int) -> int:
+        if not 0 <= value <= 100:
+            raise ValueError("Grade must be an integer from 0 to 100.")
+        return value
+
+
+class StudentGradeResponse(BaseModel):
+    id: int
+    course: CourseResponse
+    grade: int
