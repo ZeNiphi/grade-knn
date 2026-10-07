@@ -203,3 +203,14 @@ class PredictionResponse(BaseModel):
     message: str | None = None
     details: dict[str, int] = Field(default_factory=dict)
     created_at: datetime | None = None
+
+
+class StoredPredictionResponse(BaseModel):
+    """A persisted prediction with its current, non-persisted grade comparison."""
+
+    id: int
+    course: CourseResponse
+    predicted_grade: float
+    created_at: datetime
+    actual_grade: int | None = None
+    difference: float | None = None

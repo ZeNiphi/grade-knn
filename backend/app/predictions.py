@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from .admin_dashboard import get_current_k
@@ -16,6 +16,7 @@ from .schemas import (
     PredictionAvailabilityResponse,
     PredictionRequest,
     PredictionResponse,
+    StoredPredictionResponse,
 )
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
@@ -52,6 +53,39 @@ def prediction_response(
     )
 
 
+def stored_prediction_response(
+    prediction: Prediction, course: Course, actual_grade: int | None
+) -> StoredPredictionResponse:
+    """Expose a stored result without reconstructing unstored KNN diagnostics."""
+    return StoredPredictionResponse(
+        id=prediction.id,
+        course=course_response(course),
+        predicted_grade=prediction.predicted_grade,
+        created_at=prediction.created_at,
+        actual_grade=actual_grade,
+        difference=(prediction.predicted_grade - actual_grade)
+        if actual_grade is not None
+        else None,
+    )
+
+
+def prediction_history_rows(db: Session, student: User):
+    """Read one Student's stored predictions with their current grade, if any."""
+    return db.execute(
+        select(Prediction, Course, UserGrade.grade)
+        .join(Course, Course.id == Prediction.course_id)
+        .outerjoin(
+            UserGrade,
+            and_(
+                UserGrade.user_id == student.id,
+                UserGrade.course_id == Prediction.course_id,
+            ),
+        )
+        .where(Prediction.user_id == student.id)
+        .order_by(Prediction.created_at.desc(), Prediction.id.desc())
+    ).all()
+
+
 @router.get("/availability", response_model=list[PredictionAvailabilityResponse])
 def list_prediction_availability(
     db: Annotated[Session, Depends(get_db)],
@@ -74,6 +108,31 @@ def list_prediction_availability(
             has_actual_grade=course.id in grade_course_ids,
         )
         for course in courses
+    ]
+
+
+@router.get("/latest", response_model=StoredPredictionResponse | None)
+def get_latest_prediction(
+    db: Annotated[Session, Depends(get_db)],
+    student: Annotated[User, Depends(require_student)],
+) -> StoredPredictionResponse | None:
+    """Return the most recent stored result for this Student, if one exists."""
+    rows = prediction_history_rows(db, student)
+    if not rows:
+        return None
+    prediction, course, actual_grade = rows[0]
+    return stored_prediction_response(prediction, course, actual_grade)
+
+
+@router.get("/history", response_model=list[StoredPredictionResponse])
+def list_prediction_history(
+    db: Annotated[Session, Depends(get_db)],
+    student: Annotated[User, Depends(require_student)],
+) -> list[StoredPredictionResponse]:
+    """Return this Student's stored results in deterministic newest-first order."""
+    return [
+        stored_prediction_response(prediction, course, actual_grade)
+        for prediction, course, actual_grade in prediction_history_rows(db, student)
     ]
 
 
