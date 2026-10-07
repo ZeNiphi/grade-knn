@@ -1,9 +1,10 @@
 """Request and response schemas used by the API."""
 
 import re
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 USERNAME_PATTERN = re.compile(r"[a-z0-9_]+")
 MIN_USERNAME_LENGTH = 3
@@ -168,3 +169,48 @@ class KNNSettingWrite(BaseModel):
         if value <= 0:
             raise ValueError("k must be a positive integer.")
         return value
+
+
+class PredictionAvailabilityResponse(BaseModel):
+    """The current Student's eligibility for one active target course."""
+
+    course: CourseResponse
+    is_available: bool
+    has_actual_grade: bool
+
+
+class PredictionRequest(BaseModel):
+    """The active course for which a Student requests a fresh prediction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    course_id: StrictInt
+
+
+class PredictionResponse(BaseModel):
+    """A fresh KNN result, including expected insufficient-data outcomes."""
+
+    status: Literal["success", "insufficient_data"]
+    course: CourseResponse
+    predicted_grade: float | None
+    course_average: float | None
+    neighbor_count: int
+    k: int
+    minimum_common_courses: int
+    code: Literal[
+        "INSUFFICIENT_INPUT_GRADES", "INSUFFICIENT_NEIGHBORS"
+    ] | None = None
+    message: str | None = None
+    details: dict[str, int] = Field(default_factory=dict)
+    created_at: datetime | None = None
+
+
+class StoredPredictionResponse(BaseModel):
+    """A persisted prediction with its current, non-persisted grade comparison."""
+
+    id: int
+    course: CourseResponse
+    predicted_grade: float
+    created_at: datetime
+    actual_grade: int | None = None
+    difference: float | None = None

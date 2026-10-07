@@ -19,6 +19,7 @@ from .courses import router as courses_router
 from .database import create_sqlite_engine, get_db
 from .grades import router as grades_router
 from .historical_students import router as historical_students_router
+from .predictions import router as predictions_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -98,5 +99,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(courses_router)
     app.include_router(grades_router)
     app.include_router(historical_students_router)
+    app.include_router(predictions_router)
 
     return app
