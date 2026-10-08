@@ -10,6 +10,32 @@ export function getCurrentUser(token) {
   })
 }
 
+function authorization(token) {
+  return { headers: { Authorization: `Bearer ${token}` } }
+}
+
+export function getStudentGrades(token) {
+  return api.get('/grades', authorization(token))
+}
+
+export function getActiveCourses(token) {
+  return api.get('/courses', authorization(token))
+}
+
+export function saveStudentGrade(token, grade) {
+  return api.post('/grades', grade, authorization(token))
+}
+
+export function deleteStudentGrade(token, courseId) {
+  return api.delete(`/grades/${courseId}`, authorization(token))
+}
+
+export function hasInvalidSession(error) {
+  return ['AUTHENTICATION_REQUIRED', 'ACCOUNT_DISABLED'].includes(
+    error.response?.data?.code,
+  )
+}
+
 export function apiErrorMessage(error) {
   const response = error.response
 

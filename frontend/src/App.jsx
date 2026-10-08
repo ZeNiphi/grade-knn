@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   BrowserRouter,
   Link,
@@ -9,7 +9,15 @@ import {
   useNavigate,
 } from 'react-router'
 
-import api, { apiErrorMessage, getCurrentUser } from './api.js'
+import api, {
+  apiErrorMessage,
+  deleteStudentGrade,
+  getActiveCourses,
+  getCurrentUser,
+  getStudentGrades,
+  hasInvalidSession,
+  saveStudentGrade,
+} from './api.js'
 
 const TOKEN_KEY = 'course-grade-prediction-token'
 
@@ -64,6 +72,11 @@ function LoginPage({ student, sessionError, onLogin }) {
       {location.state?.notice && (
         <div className="alert alert-success" role="status">
           {location.state.notice}
+        </div>
+      )}
+      {location.state?.error && (
+        <div className="alert alert-danger" role="alert">
+          {location.state.error}
         </div>
       )}
       {(error || sessionError) && (
@@ -203,6 +216,147 @@ function RegistrationPage({ student }) {
 
 function StudentWorkspace({ student, onLogout }) {
   const navigate = useNavigate()
+  const [grades, setGrades] = useState([])
+  const [courses, setCourses] = useState([])
+  const [selectedCourseId, setSelectedCourseId] = useState('')
+  const [grade, setGrade] = useState('')
+  const [editingGrade, setEditingGrade] = useState(null)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [deletingCourseId, setDeletingCourseId] = useState(null)
+  const latestWorkspaceLoad = useRef(0)
+
+  function token() {
+    return localStorage.getItem(TOKEN_KEY)
+  }
+
+  function showRequestError(requestError) {
+    if (hasInvalidSession(requestError)) {
+      onLogout()
+      navigate('/login', {
+        replace: true,
+        state: { error: apiErrorMessage(requestError) },
+      })
+      return true
+    }
+    setError(apiErrorMessage(requestError))
+    return false
+  }
+
+  async function loadWorkspace() {
+    const loadId = latestWorkspaceLoad.current + 1
+    latestWorkspaceLoad.current = loadId
+    const savedToken = token()
+    if (!savedToken) {
+      if (loadId === latestWorkspaceLoad.current) {
+        onLogout()
+      }
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const [gradesResponse, coursesResponse] = await Promise.all([
+        getStudentGrades(savedToken),
+        getActiveCourses(savedToken),
+      ])
+      if (loadId !== latestWorkspaceLoad.current) {
+        return
+      }
+      setGrades(gradesResponse.data)
+      setCourses(coursesResponse.data)
+    } catch (requestError) {
+      if (loadId === latestWorkspaceLoad.current) {
+        showRequestError(requestError)
+      }
+    } finally {
+      if (loadId === latestWorkspaceLoad.current) {
+        setIsLoading(false)
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (student) {
+      void loadWorkspace()
+    }
+  }, [student])
+
+  function resetForm() {
+    setSelectedCourseId('')
+    setGrade('')
+    setEditingGrade(null)
+  }
+
+  function selectCourse(event) {
+    const courseId = event.target.value
+    setSelectedCourseId(courseId)
+    const existingGrade = grades.find((item) => item.course.id === Number(courseId))
+    if (existingGrade) {
+      setEditingGrade(existingGrade)
+      setGrade(String(existingGrade.grade))
+    } else {
+      setEditingGrade(null)
+      setGrade('')
+    }
+  }
+
+  function beginEditing(item) {
+    setEditingGrade(item)
+    setSelectedCourseId(String(item.course.id))
+    setGrade(String(item.grade))
+    setError('')
+    setNotice('')
+  }
+
+  async function submitGrade(event) {
+    event.preventDefault()
+    setError('')
+    setNotice('')
+
+    const courseId = Number(selectedCourseId)
+    const numericGrade = Number(grade)
+    if (!Number.isInteger(numericGrade) || numericGrade < 0 || numericGrade > 100) {
+      setError('Grade must be an integer from 0 to 100.')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      await saveStudentGrade(token(), { course_id: courseId, grade: numericGrade })
+      setNotice(editingGrade ? 'Grade updated.' : 'Grade added.')
+      resetForm()
+      await loadWorkspace()
+    } catch (requestError) {
+      showRequestError(requestError)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function removeGrade(item) {
+    if (!window.confirm(`Delete the grade for ${item.course.code}?`)) {
+      return
+    }
+
+    setError('')
+    setNotice('')
+    setDeletingCourseId(item.course.id)
+    try {
+      await deleteStudentGrade(token(), item.course.id)
+      if (editingGrade?.course.id === item.course.id) {
+        resetForm()
+      }
+      setNotice('Grade deleted.')
+      await loadWorkspace()
+    } catch (requestError) {
+      showRequestError(requestError)
+    } finally {
+      setDeletingCourseId(null)
+    }
+  }
 
   if (!student) {
     return <Navigate to="/login" replace />
@@ -227,9 +381,134 @@ function StudentWorkspace({ student, onLogout }) {
         </div>
       </nav>
       <main className="container py-5">
-        <h1 className="mb-3">Student workspace</h1>
-        <div className="alert alert-info mb-0" role="status">
-          Your account is ready. Grade entry, predictions, and history will be added in the next Student interface steps.
+        <h1 className="mb-4">Student workspace</h1>
+        {error && <div className="alert alert-danger" role="alert">{error}</div>}
+        {notice && <div className="alert alert-success" role="status">{notice}</div>}
+        <div className="row g-4">
+          <section className="col-lg-5" aria-labelledby="grade-form-heading">
+            <div className="card h-100">
+              <div className="card-body">
+                <h2 className="h4 card-title" id="grade-form-heading">
+                  {editingGrade ? 'Update grade' : 'Add grade'}
+                </h2>
+                <form onSubmit={submitGrade}>
+                  <div className="mb-3">
+                    <label className="form-label" htmlFor="grade-course">Course</label>
+                    <select
+                      className="form-select"
+                      disabled={Boolean(editingGrade)}
+                      id="grade-course"
+                      onChange={selectCourse}
+                      required
+                      value={selectedCourseId}
+                    >
+                      <option value="">Choose an active course</option>
+                      {courses.map((course) => (
+                        <option key={course.id} value={course.id}>
+                          {course.code} — {course.name}
+                        </option>
+                      ))}
+                      {editingGrade && !editingGrade.course.is_active && (
+                        <option value={editingGrade.course.id}>
+                          {editingGrade.course.code} — {editingGrade.course.name} (inactive)
+                        </option>
+                      )}
+                    </select>
+                    {!editingGrade && selectedCourseId && grades.some(
+                      (item) => item.course.id === Number(selectedCourseId),
+                    ) && (
+                      <div className="form-text">
+                        This course already has a grade. Submitting will update it.
+                      </div>
+                    )}
+                    {editingGrade && !editingGrade.course.is_active && (
+                      <div className="form-text">
+                        This course is inactive, but you can correct or delete its existing grade.
+                      </div>
+                    )}
+                  </div>
+                  <div className="mb-3">
+                    <label className="form-label" htmlFor="grade-value">Grade</label>
+                    <input
+                      className="form-control"
+                      id="grade-value"
+                      onChange={(event) => setGrade(event.target.value)}
+                      required
+                      type="number"
+                      value={grade}
+                    />
+                    <div className="form-text">Enter a whole number from 0 to 100.</div>
+                  </div>
+                  <div className="d-flex gap-2">
+                    <button className="btn btn-primary" disabled={isSaving} type="submit">
+                      {isSaving ? 'Saving…' : editingGrade ? 'Update grade' : 'Add grade'}
+                    </button>
+                    {editingGrade && (
+                      <button className="btn btn-outline-secondary" onClick={resetForm} type="button">
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </div>
+            </div>
+          </section>
+          <section className="col-lg-7" aria-labelledby="grades-heading">
+            <h2 className="h4" id="grades-heading">Your grades</h2>
+            {isLoading ? (
+              <p className="text-body-secondary">Loading grades…</p>
+            ) : grades.length === 0 ? (
+              <p className="text-body-secondary">You have not added any grades yet.</p>
+            ) : (
+              <div className="table-responsive">
+                <table className="table align-middle">
+                  <thead>
+                    <tr>
+                      <th scope="col">Course</th>
+                      <th scope="col">Grade</th>
+                      <th scope="col">Status</th>
+                      <th scope="col"><span className="visually-hidden">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grades.map((item) => (
+                      <tr key={item.id}>
+                        <td>
+                          <strong>{item.course.code}</strong><br />
+                          <span className="text-body-secondary">{item.course.name}</span>
+                        </td>
+                        <td>{item.grade}</td>
+                        <td>
+                          {item.course.is_active ? (
+                            <span className="badge text-bg-success">Active</span>
+                          ) : (
+                            <span className="badge text-bg-secondary">Inactive</span>
+                          )}
+                        </td>
+                        <td className="text-end text-nowrap">
+                          <button
+                            className="btn btn-sm btn-outline-primary me-2"
+                            onClick={() => beginEditing(item)}
+                            type="button"
+                          >
+                            Update
+                          </button>
+                          <button
+                            className="btn btn-sm btn-outline-danger"
+                            disabled={deletingCourseId === item.course.id}
+                            onClick={() => removeGrade(item)}
+                            type="button"
+                          >
+                            {deletingCourseId === item.course.id ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </div>
       </main>
     </>
