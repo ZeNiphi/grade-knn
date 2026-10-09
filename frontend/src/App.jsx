@@ -11,6 +11,15 @@ import {
 
 import api, {
   apiErrorMessage,
+  createAdminCourse,
+  deleteHistoricalStudent,
+  deleteAdminCourse,
+  getAdminStudent,
+  getAdminStudents,
+  getAdminCourses,
+  getAdminSummary,
+  getHistoricalStudent,
+  getHistoricalStudents,
   deleteStudentGrade,
   getActiveCourses,
   getCurrentUser,
@@ -21,9 +30,17 @@ import api, {
   hasInvalidSession,
   requestPrediction,
   saveStudentGrade,
+  setAdminStudentActive,
+  setAdminCourseActive,
+  setHistoricalStudentActive,
+  updateAdminCourse,
 } from './api.js'
 
 const TOKEN_KEY = 'course-grade-prediction-token'
+
+function homePath(user) {
+  return user?.role === 'admin' ? '/admin' : '/workspace'
+}
 
 function formatGrade(value) {
   return value == null ? 'Not available' : Number(value).toFixed(2)
@@ -60,7 +77,7 @@ function LoginPage({ student, sessionError, onLogin }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   if (student) {
-    return <Navigate to="/workspace" replace />
+    return <Navigate to={homePath(student)} replace />
   }
 
   async function submitLogin(event) {
@@ -70,14 +87,9 @@ function LoginPage({ student, sessionError, onLogin }) {
 
     try {
       const response = await api.post('/auth/login', { username, password })
-      await onLogin(response.data.access_token)
-      navigate('/workspace', { replace: true })
+      navigate(homePath(await onLogin(response.data.access_token)), { replace: true })
     } catch (requestError) {
-      setError(
-        requestError.message === 'ADMIN_ACCESS_UNAVAILABLE'
-          ? 'Admin access will be available in a later step.'
-          : apiErrorMessage(requestError),
-      )
+      setError(apiErrorMessage(requestError))
     } finally {
       setIsSubmitting(false)
     }
@@ -148,7 +160,7 @@ function RegistrationPage({ student }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   if (student) {
-    return <Navigate to="/workspace" replace />
+    return <Navigate to={homePath(student)} replace />
   }
 
   async function submitRegistration(event) {
@@ -443,6 +455,10 @@ function StudentWorkspace({ student, onLogout }) {
     return <Navigate to="/login" replace />
   }
 
+  if (student.role !== 'student') {
+    return <Navigate to="/admin" replace />
+  }
+
   return (
     <>
       <StudentNavigation student={student} onLogout={onLogout} />
@@ -716,6 +732,10 @@ function PredictionHistoryPage({ student, onLogout }) {
     return <Navigate to="/login" replace />
   }
 
+  if (student.role !== 'student') {
+    return <Navigate to="/admin" replace />
+  }
+
   return (
     <>
       <StudentNavigation student={student} onLogout={onLogout} />
@@ -760,6 +780,674 @@ function PredictionHistoryPage({ student, onLogout }) {
   )
 }
 
+function AdminNavigation({ student, onLogout }) {
+  const navigate = useNavigate()
+
+  function logout() {
+    onLogout()
+    navigate('/login', { replace: true, state: { notice: 'You have logged out.' } })
+  }
+
+  return (
+    <nav className="navbar navbar-expand-sm bg-body-tertiary border-bottom">
+      <div className="container">
+        <Link className="navbar-brand" to="/admin">Course Grade Prediction</Link>
+        <div className="d-flex align-items-center gap-3">
+          <Link className="link-secondary" to="/admin">Summary</Link>
+          <Link className="link-secondary" to="/admin/courses">Courses</Link>
+          <Link className="link-secondary" to="/admin/historical-students">Historical profiles</Link>
+          <Link className="link-secondary" to="/admin/students">Students</Link>
+          <span className="text-body-secondary">Admin: {student.username}</span>
+          <button className="btn btn-outline-secondary btn-sm" onClick={logout} type="button">
+            Log out
+          </button>
+        </div>
+      </div>
+    </nav>
+  )
+}
+
+function AdminSummaryPage({ student, onLogout }) {
+  const navigate = useNavigate()
+  const [summary, setSummary] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!student || student.role !== 'admin') {
+      return
+    }
+
+    const token = localStorage.getItem(TOKEN_KEY)
+    if (!token) {
+      onLogout()
+      return
+    }
+
+    getAdminSummary(token)
+      .then((response) => setSummary(response.data))
+      .catch((requestError) => {
+        if (hasInvalidSession(requestError)) {
+          onLogout()
+          navigate('/login', {
+            replace: true,
+            state: { error: apiErrorMessage(requestError) },
+          })
+          return
+        }
+        setError(apiErrorMessage(requestError))
+      })
+  }, [student])
+
+  if (!student) {
+    return <Navigate to="/login" replace />
+  }
+  if (student.role !== 'admin') {
+    return <Navigate to="/workspace" replace />
+  }
+
+  return (
+    <>
+      <AdminNavigation student={student} onLogout={onLogout} />
+      <main className="container py-5">
+        <h1 className="mb-4">Admin summary</h1>
+        {error && <div className="alert alert-danger" role="alert">{error}</div>}
+        {!summary && !error ? (
+          <p className="text-body-secondary">Loading summary…</p>
+        ) : summary ? (
+          <div className="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3">
+            <SummaryCount label="Registered accounts" value={summary.registered_account_count} />
+            <SummaryCount label="Active Students" value={summary.active_student_count} />
+            <SummaryCount label="Courses" value={`${summary.active_course_count} active / ${summary.course_count} total`} />
+            <SummaryCount label="Historical profiles" value={`${summary.active_historical_student_count} active / ${summary.historical_student_count} total`} />
+            <SummaryCount label="Stored grades" value={summary.stored_grade_count} />
+          </div>
+        ) : null}
+      </main>
+    </>
+  )
+}
+
+function SummaryCount({ label, value }) {
+  return (
+    <div className="col">
+      <div className="card h-100">
+        <div className="card-body">
+          <div className="text-body-secondary small">{label}</div>
+          <div className="fs-4">{value}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AdminCoursesPage({ student, onLogout }) {
+  const navigate = useNavigate()
+  const [courses, setCourses] = useState([])
+  const [code, setCode] = useState('')
+  const [name, setName] = useState('')
+  const [editingCourse, setEditingCourse] = useState(null)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [busyCourseId, setBusyCourseId] = useState(null)
+  const [isSaving, setIsSaving] = useState(false)
+
+  function token() {
+    return localStorage.getItem(TOKEN_KEY)
+  }
+
+  function handleRequestError(requestError) {
+    if (hasInvalidSession(requestError)) {
+      onLogout()
+      navigate('/login', {
+        replace: true,
+        state: { error: apiErrorMessage(requestError) },
+      })
+      return true
+    }
+    setError(apiErrorMessage(requestError))
+    return false
+  }
+
+  async function loadCourses() {
+    const savedToken = token()
+    if (!savedToken) {
+      onLogout()
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const response = await getAdminCourses(savedToken)
+      setCourses(response.data)
+      setHasLoaded(true)
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (student?.role === 'admin') {
+      void loadCourses()
+    }
+  }, [student])
+
+  function resetForm() {
+    setCode('')
+    setName('')
+    setEditingCourse(null)
+  }
+
+  function beginEditing(course) {
+    setEditingCourse(course)
+    setCode(course.code)
+    setName(course.name)
+    setError('')
+    setNotice('')
+  }
+
+  async function submitCourse(event) {
+    event.preventDefault()
+    setError('')
+    setNotice('')
+    const trimmedCode = code.trim()
+    const trimmedName = name.trim()
+    if (!trimmedCode || !trimmedName) {
+      setError('Course code and name are required.')
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      if (editingCourse) {
+        await updateAdminCourse(token(), editingCourse.id, { code: trimmedCode, name: trimmedName })
+        setNotice('Course updated.')
+      } else {
+        await createAdminCourse(token(), { code: trimmedCode, name: trimmedName })
+        setNotice('Course added.')
+      }
+      resetForm()
+      await loadCourses()
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function changeActiveState(course) {
+    setError('')
+    setNotice('')
+    setBusyCourseId(course.id)
+    try {
+      await setAdminCourseActive(token(), course.id, !course.is_active)
+      setNotice(`Course ${course.is_active ? 'deactivated' : 'activated'}.`)
+      await loadCourses()
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setBusyCourseId(null)
+    }
+  }
+
+  async function removeCourse(course) {
+    if (!window.confirm(
+      `Permanently delete ${course.code}? If it has fewer than 10 associated grades, this also deletes its related grades and saved predictions. This cannot be undone.`,
+    )) {
+      return
+    }
+
+    setError('')
+    setNotice('')
+    setBusyCourseId(course.id)
+    try {
+      await deleteAdminCourse(token(), course.id)
+      if (editingCourse?.id === course.id) {
+        resetForm()
+      }
+      setNotice('Course permanently deleted.')
+      await loadCourses()
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setBusyCourseId(null)
+    }
+  }
+
+  if (!student) {
+    return <Navigate to="/login" replace />
+  }
+  if (student.role !== 'admin') {
+    return <Navigate to="/workspace" replace />
+  }
+
+  return (
+    <>
+      <AdminNavigation student={student} onLogout={onLogout} />
+      <main className="container py-5">
+        <h1 className="mb-4">Course management</h1>
+        {error && <div className="alert alert-danger" role="alert">{error}</div>}
+        {notice && <div className="alert alert-success" role="status">{notice}</div>}
+        <div className="row g-4">
+          <section className="col-lg-4" aria-labelledby="course-form-heading">
+            <div className="card">
+              <div className="card-body">
+                <h2 className="h4 card-title" id="course-form-heading">
+                  {editingCourse ? 'Edit course' : 'Add course'}
+                </h2>
+                <form onSubmit={submitCourse}>
+                  <div className="mb-3">
+                    <label className="form-label" htmlFor="course-code">Course code</label>
+                    <input className="form-control" id="course-code" maxLength="20" onChange={(event) => setCode(event.target.value)} required value={code} />
+                  </div>
+                  <div className="mb-3">
+                    <label className="form-label" htmlFor="course-name">Course name</label>
+                    <input className="form-control" id="course-name" maxLength="150" onChange={(event) => setName(event.target.value)} required value={name} />
+                  </div>
+                  <div className="d-flex gap-2">
+                    <button className="btn btn-primary" disabled={isSaving} type="submit">
+                      {isSaving ? 'Saving…' : editingCourse ? 'Save changes' : 'Add course'}
+                    </button>
+                    {editingCourse && <button className="btn btn-outline-secondary" onClick={resetForm} type="button">Cancel</button>}
+                  </div>
+                </form>
+              </div>
+            </div>
+          </section>
+          <section className="col-lg-8" aria-labelledby="courses-heading">
+            <h2 className="h4" id="courses-heading">All courses</h2>
+            {isLoading ? (
+              <p className="text-body-secondary">Loading courses…</p>
+            ) : !hasLoaded ? null : courses.length === 0 ? (
+              <p className="text-body-secondary">No courses have been added yet.</p>
+            ) : (
+              <div className="table-responsive">
+                <table className="table align-middle">
+                  <thead>
+                    <tr><th scope="col">Course</th><th scope="col">Status</th><th scope="col"><span className="visually-hidden">Actions</span></th></tr>
+                  </thead>
+                  <tbody>
+                    {courses.map((course) => (
+                      <tr key={course.id}>
+                        <td><strong>{course.code}</strong><br /><span className="text-body-secondary">{course.name}</span></td>
+                        <td>{course.is_active ? <span className="badge text-bg-success">Active</span> : <span className="badge text-bg-secondary">Inactive</span>}</td>
+                        <td className="text-end text-nowrap">
+                          <button className="btn btn-sm btn-outline-primary me-2" disabled={busyCourseId === course.id} onClick={() => beginEditing(course)} type="button">Edit</button>
+                          <button className="btn btn-sm btn-outline-secondary me-2" disabled={busyCourseId === course.id} onClick={() => changeActiveState(course)} type="button">
+                            {busyCourseId === course.id ? 'Working…' : course.is_active ? 'Deactivate' : 'Activate'}
+                          </button>
+                          <button className="btn btn-sm btn-outline-danger" disabled={busyCourseId === course.id} onClick={() => removeCourse(course)} type="button">Delete</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+      </main>
+    </>
+  )
+}
+
+function profileLabel(profile) {
+  return profile.generated_key || `Historical profile #${profile.id}`
+}
+
+function AdminHistoricalStudentsPage({ student, onLogout }) {
+  const navigate = useNavigate()
+  const [profiles, setProfiles] = useState([])
+  const [selectedProfile, setSelectedProfile] = useState(null)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [busyProfileId, setBusyProfileId] = useState(null)
+
+  function token() {
+    return localStorage.getItem(TOKEN_KEY)
+  }
+
+  function handleRequestError(requestError) {
+    if (hasInvalidSession(requestError)) {
+      onLogout()
+      navigate('/login', {
+        replace: true,
+        state: { error: apiErrorMessage(requestError) },
+      })
+      return
+    }
+    setError(apiErrorMessage(requestError))
+  }
+
+  async function loadProfiles() {
+    setIsLoading(true)
+    try {
+      const response = await getHistoricalStudents(token())
+      setProfiles(response.data)
+      setHasLoaded(true)
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (student?.role === 'admin') {
+      void loadProfiles()
+    }
+  }, [student])
+
+  async function showDetails(profileId) {
+    setError('')
+    setNotice('')
+    setBusyProfileId(profileId)
+    try {
+      const response = await getHistoricalStudent(token(), profileId)
+      setSelectedProfile(response.data)
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setBusyProfileId(null)
+    }
+  }
+
+  async function changeActiveState(profile) {
+    setError('')
+    setNotice('')
+    setBusyProfileId(profile.id)
+    try {
+      const response = await setHistoricalStudentActive(token(), profile.id, !profile.is_active_for_knn)
+      setSelectedProfile((current) => (
+        current?.id === profile.id ? { ...current, ...response.data } : current
+      ))
+      setNotice(`Historical profile ${profile.is_active_for_knn ? 'deactivated' : 'activated'} for KNN.`)
+      await loadProfiles()
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setBusyProfileId(null)
+    }
+  }
+
+  async function removeProfile(profile) {
+    if (!window.confirm(
+      `Permanently delete ${profileLabel(profile)} and its historical grades? Courses, registered Students, and saved predictions are not deleted.`,
+    )) {
+      return
+    }
+
+    setError('')
+    setNotice('')
+    setBusyProfileId(profile.id)
+    try {
+      await deleteHistoricalStudent(token(), profile.id)
+      if (selectedProfile?.id === profile.id) {
+        setSelectedProfile(null)
+      }
+      setNotice('Historical profile deleted.')
+      await loadProfiles()
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setBusyProfileId(null)
+    }
+  }
+
+  if (!student) {
+    return <Navigate to="/login" replace />
+  }
+  if (student.role !== 'admin') {
+    return <Navigate to="/workspace" replace />
+  }
+
+  return (
+    <>
+      <AdminNavigation student={student} onLogout={onLogout} />
+      <main className="container py-5">
+        <h1 className="mb-4">Historical profiles</h1>
+        {error && <div className="alert alert-danger" role="alert">{error}</div>}
+        {notice && <div className="alert alert-success" role="status">{notice}</div>}
+        <div className="row g-4">
+          <section className="col-lg-8" aria-labelledby="historical-profiles-heading">
+            <h2 className="h4" id="historical-profiles-heading">All profiles</h2>
+            {isLoading ? (
+              <p className="text-body-secondary">Loading historical profiles…</p>
+            ) : !hasLoaded ? null : profiles.length === 0 ? (
+              <p className="text-body-secondary">No historical profiles are available.</p>
+            ) : (
+              <div className="table-responsive">
+                <table className="table align-middle">
+                  <thead>
+                    <tr>
+                      <th scope="col">Profile</th>
+                      <th scope="col">Grades</th>
+                      <th scope="col">KNN status</th>
+                      <th scope="col"><span className="visually-hidden">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {profiles.map((profile) => (
+                      <tr key={profile.id}>
+                        <td><strong>{profileLabel(profile)}</strong><br /><span className="text-body-secondary">ID {profile.id}</span></td>
+                        <td>{profile.grade_count}</td>
+                        <td>{profile.is_active_for_knn ? <span className="badge text-bg-success">Active</span> : <span className="badge text-bg-secondary">Inactive</span>}</td>
+                        <td className="text-end text-nowrap">
+                          <button className="btn btn-sm btn-outline-primary me-2" disabled={busyProfileId === profile.id} onClick={() => showDetails(profile.id)} type="button">Details</button>
+                          <button className="btn btn-sm btn-outline-secondary me-2" disabled={busyProfileId === profile.id} onClick={() => changeActiveState(profile)} type="button">
+                            {busyProfileId === profile.id ? 'Working…' : profile.is_active_for_knn ? 'Deactivate' : 'Activate'}
+                          </button>
+                          <button className="btn btn-sm btn-outline-danger" disabled={busyProfileId === profile.id} onClick={() => removeProfile(profile)} type="button">Delete</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+          <HistoricalStudentDetails profile={selectedProfile} />
+        </div>
+      </main>
+    </>
+  )
+}
+
+function HistoricalStudentDetails({ profile }) {
+  return (
+    <section className="col-lg-4" aria-labelledby="historical-details-heading">
+      <div className="card">
+        <div className="card-body">
+          <h2 className="h4 card-title" id="historical-details-heading">Profile details</h2>
+          {!profile ? (
+            <p className="text-body-secondary mb-0">Select Details to view a profile's grades.</p>
+          ) : (
+            <>
+              <dl className="row mb-3">
+                <dt className="col-sm-5">Profile</dt><dd className="col-sm-7">{profileLabel(profile)}</dd>
+                <dt className="col-sm-5">KNN status</dt><dd className="col-sm-7">{profile.is_active_for_knn ? 'Active' : 'Inactive'}</dd>
+                <dt className="col-sm-5">Grades</dt><dd className="col-sm-7">{profile.grade_count}</dd>
+              </dl>
+              {profile.grades.length === 0 ? (
+                <p className="text-body-secondary mb-0">This profile has no grades.</p>
+              ) : (
+                <ul className="list-group list-group-flush">
+                  {profile.grades.map((item) => (
+                    <li className="list-group-item px-0" key={item.course.id}>
+                      <strong>{item.course.code}</strong>: {item.grade}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function AdminStudentsPage({ student, onLogout }) {
+  const navigate = useNavigate()
+  const [students, setStudents] = useState([])
+  const [selectedStudent, setSelectedStudent] = useState(null)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [hasLoaded, setHasLoaded] = useState(false)
+  const [busyStudentId, setBusyStudentId] = useState(null)
+
+  function token() {
+    return localStorage.getItem(TOKEN_KEY)
+  }
+
+  function handleRequestError(requestError) {
+    if (hasInvalidSession(requestError)) {
+      onLogout()
+      navigate('/login', {
+        replace: true,
+        state: { error: apiErrorMessage(requestError) },
+      })
+      return
+    }
+    setError(apiErrorMessage(requestError))
+  }
+
+  async function loadStudents() {
+    setIsLoading(true)
+    try {
+      const response = await getAdminStudents(token())
+      setStudents(response.data)
+      setHasLoaded(true)
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (student?.role === 'admin') {
+      void loadStudents()
+    }
+  }, [student])
+
+  async function showDetails(studentId) {
+    setError('')
+    setNotice('')
+    setBusyStudentId(studentId)
+    try {
+      const response = await getAdminStudent(token(), studentId)
+      setSelectedStudent(response.data)
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setBusyStudentId(null)
+    }
+  }
+
+  async function changeActiveState(managedStudent) {
+    setError('')
+    setNotice('')
+    setBusyStudentId(managedStudent.id)
+    try {
+      const response = await setAdminStudentActive(token(), managedStudent.id, !managedStudent.is_active)
+      setSelectedStudent((current) => (
+        current?.id === managedStudent.id ? response.data : current
+      ))
+      setNotice(`Student account ${managedStudent.is_active ? 'disabled' : 'reactivated'}.`)
+      await loadStudents()
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setBusyStudentId(null)
+    }
+  }
+
+  if (!student) {
+    return <Navigate to="/login" replace />
+  }
+  if (student.role !== 'admin') {
+    return <Navigate to="/workspace" replace />
+  }
+
+  return (
+    <>
+      <AdminNavigation student={student} onLogout={onLogout} />
+      <main className="container py-5">
+        <h1 className="mb-4">Registered Students</h1>
+        {error && <div className="alert alert-danger" role="alert">{error}</div>}
+        {notice && <div className="alert alert-success" role="status">{notice}</div>}
+        <div className="row g-4">
+          <section className="col-lg-8" aria-labelledby="registered-students-heading">
+            <h2 className="h4" id="registered-students-heading">All Student accounts</h2>
+            {isLoading ? (
+              <p className="text-body-secondary">Loading Student accounts…</p>
+            ) : !hasLoaded ? null : students.length === 0 ? (
+              <p className="text-body-secondary">No Student accounts are registered.</p>
+            ) : (
+              <div className="table-responsive">
+                <table className="table align-middle">
+                  <thead>
+                    <tr>
+                      <th scope="col">Username</th>
+                      <th scope="col">Grades</th>
+                      <th scope="col">Account status</th>
+                      <th scope="col"><span className="visually-hidden">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {students.map((managedStudent) => (
+                      <tr key={managedStudent.id}>
+                        <td><strong>{managedStudent.username}</strong><br /><span className="text-body-secondary">ID {managedStudent.id}</span></td>
+                        <td>{managedStudent.grade_count}</td>
+                        <td>{managedStudent.is_active ? <span className="badge text-bg-success">Active</span> : <span className="badge text-bg-secondary">Disabled</span>}</td>
+                        <td className="text-end text-nowrap">
+                          <button className="btn btn-sm btn-outline-primary me-2" disabled={busyStudentId === managedStudent.id} onClick={() => showDetails(managedStudent.id)} type="button">Details</button>
+                          <button className="btn btn-sm btn-outline-secondary" disabled={busyStudentId === managedStudent.id} onClick={() => changeActiveState(managedStudent)} type="button">
+                            {busyStudentId === managedStudent.id ? 'Working…' : managedStudent.is_active ? 'Disable' : 'Reactivate'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+          <RegisteredStudentDetails managedStudent={selectedStudent} />
+        </div>
+      </main>
+    </>
+  )
+}
+
+function RegisteredStudentDetails({ managedStudent }) {
+  return (
+    <section className="col-lg-4" aria-labelledby="student-details-heading">
+      <div className="card">
+        <div className="card-body">
+          <h2 className="h4 card-title" id="student-details-heading">Student details</h2>
+          {!managedStudent ? (
+            <p className="text-body-secondary mb-0">Select Details to view account information.</p>
+          ) : (
+            <dl className="row mb-0">
+              <dt className="col-sm-5">Username</dt><dd className="col-sm-7">{managedStudent.username}</dd>
+              <dt className="col-sm-5">Account</dt><dd className="col-sm-7">{managedStudent.is_active ? 'Active' : 'Disabled'}</dd>
+              <dt className="col-sm-5">Grades</dt><dd className="col-sm-7">{managedStudent.grade_count}</dd>
+            </dl>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function Application() {
   const [student, setStudent] = useState(null)
   const [sessionError, setSessionError] = useState('')
@@ -774,11 +1462,7 @@ function Application() {
 
     getCurrentUser(token)
       .then((response) => {
-        if (response.data.role === 'student') {
-          setStudent(response.data)
-        } else {
-          localStorage.removeItem(TOKEN_KEY)
-        }
+        setStudent(response.data)
       })
       .catch((requestError) => {
         if (requestError.response) {
@@ -798,12 +1482,9 @@ function Application() {
   async function login(token) {
     setSessionError('')
     const response = await getCurrentUser(token)
-    if (response.data.role !== 'student') {
-      localStorage.removeItem(TOKEN_KEY)
-      throw new Error('ADMIN_ACCESS_UNAVAILABLE')
-    }
     localStorage.setItem(TOKEN_KEY, token)
     setStudent(response.data)
+    return response.data
   }
 
   function logout() {
@@ -825,7 +1506,11 @@ function Application() {
       <Route path="/register" element={<RegistrationPage student={student} />} />
       <Route path="/workspace" element={<StudentWorkspace student={student} onLogout={logout} />} />
       <Route path="/history" element={<PredictionHistoryPage student={student} onLogout={logout} />} />
-      <Route path="*" element={<Navigate to={student ? '/workspace' : '/login'} replace />} />
+      <Route path="/admin" element={<AdminSummaryPage student={student} onLogout={logout} />} />
+      <Route path="/admin/courses" element={<AdminCoursesPage student={student} onLogout={logout} />} />
+      <Route path="/admin/historical-students" element={<AdminHistoricalStudentsPage student={student} onLogout={logout} />} />
+      <Route path="/admin/students" element={<AdminStudentsPage student={student} onLogout={logout} />} />
+      <Route path="*" element={<Navigate to={student ? homePath(student) : '/login'} replace />} />
     </Routes>
   )
 }

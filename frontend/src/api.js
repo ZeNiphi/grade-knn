@@ -46,6 +46,70 @@ export function getPredictionHistory(token) {
   return api.get('/predictions/history', authorization(token))
 }
 
+export function getAdminSummary(token) {
+  return api.get('/admin/summary', authorization(token))
+}
+
+export function getAdminCourses(token) {
+  return api.get('/admin/courses', authorization(token))
+}
+
+export function createAdminCourse(token, course) {
+  return api.post('/admin/courses', course, authorization(token))
+}
+
+export function updateAdminCourse(token, courseId, course) {
+  return api.put(`/admin/courses/${courseId}`, course, authorization(token))
+}
+
+export function setAdminCourseActive(token, courseId, isActive) {
+  return api.post(
+    `/admin/courses/${courseId}/${isActive ? 'activate' : 'deactivate'}`,
+    undefined,
+    authorization(token),
+  )
+}
+
+export function deleteAdminCourse(token, courseId) {
+  return api.delete(`/admin/courses/${courseId}`, authorization(token))
+}
+
+export function getHistoricalStudents(token) {
+  return api.get('/admin/historical-students', authorization(token))
+}
+
+export function getHistoricalStudent(token, historicalStudentId) {
+  return api.get(`/admin/historical-students/${historicalStudentId}`, authorization(token))
+}
+
+export function setHistoricalStudentActive(token, historicalStudentId, isActive) {
+  return api.post(
+    `/admin/historical-students/${historicalStudentId}/${isActive ? 'activate' : 'deactivate'}`,
+    undefined,
+    authorization(token),
+  )
+}
+
+export function deleteHistoricalStudent(token, historicalStudentId) {
+  return api.delete(`/admin/historical-students/${historicalStudentId}`, authorization(token))
+}
+
+export function getAdminStudents(token) {
+  return api.get('/admin/students', authorization(token))
+}
+
+export function getAdminStudent(token, studentId) {
+  return api.get(`/admin/students/${studentId}`, authorization(token))
+}
+
+export function setAdminStudentActive(token, studentId, isActive) {
+  return api.post(
+    `/admin/students/${studentId}/${isActive ? 'activate' : 'disable'}`,
+    undefined,
+    authorization(token),
+  )
+}
+
 export function hasInvalidSession(error) {
   return ['AUTHENTICATION_REQUIRED', 'ACCOUNT_DISABLED'].includes(
     error.response?.data?.code,
