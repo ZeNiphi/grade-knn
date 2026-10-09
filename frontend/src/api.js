@@ -30,6 +30,22 @@ export function deleteStudentGrade(token, courseId) {
   return api.delete(`/grades/${courseId}`, authorization(token))
 }
 
+export function getPredictionAvailability(token) {
+  return api.get('/predictions/availability', authorization(token))
+}
+
+export function requestPrediction(token, courseId) {
+  return api.post('/predictions', { course_id: courseId }, authorization(token))
+}
+
+export function getLatestPrediction(token) {
+  return api.get('/predictions/latest', authorization(token))
+}
+
+export function getPredictionHistory(token) {
+  return api.get('/predictions/history', authorization(token))
+}
+
 export function hasInvalidSession(error) {
   return ['AUTHENTICATION_REQUIRED', 'ACCOUNT_DISABLED'].includes(
     error.response?.data?.code,
