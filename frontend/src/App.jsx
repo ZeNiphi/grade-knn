@@ -14,12 +14,32 @@ import api, {
   deleteStudentGrade,
   getActiveCourses,
   getCurrentUser,
+  getLatestPrediction,
+  getPredictionAvailability,
+  getPredictionHistory,
   getStudentGrades,
   hasInvalidSession,
+  requestPrediction,
   saveStudentGrade,
 } from './api.js'
 
 const TOKEN_KEY = 'course-grade-prediction-token'
+
+function formatGrade(value) {
+  return value == null ? 'Not available' : Number(value).toFixed(2)
+}
+
+function formatDifference(value) {
+  if (value == null) {
+    return 'Not available'
+  }
+  return `${value >= 0 ? '+' : ''}${Number(value).toFixed(2)}`
+}
+
+function formatDate(value) {
+  const utcValue = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`
+  return new Date(utcValue).toLocaleString()
+}
 
 function PublicPage({ children }) {
   return (
@@ -214,17 +234,47 @@ function RegistrationPage({ student }) {
   )
 }
 
+function StudentNavigation({ student, onLogout }) {
+  const navigate = useNavigate()
+
+  function logout() {
+    onLogout()
+    navigate('/login', { replace: true, state: { notice: 'You have logged out.' } })
+  }
+
+  return (
+    <nav className="navbar navbar-expand-sm bg-body-tertiary border-bottom">
+      <div className="container">
+        <Link className="navbar-brand" to="/workspace">Course Grade Prediction</Link>
+        <div className="d-flex align-items-center gap-3">
+          <Link className="link-secondary" to="/history">Prediction history</Link>
+          <span className="text-body-secondary">Signed in as {student.username}</span>
+          <button className="btn btn-outline-secondary btn-sm" onClick={logout} type="button">
+            Log out
+          </button>
+        </div>
+      </div>
+    </nav>
+  )
+}
+
 function StudentWorkspace({ student, onLogout }) {
   const navigate = useNavigate()
   const [grades, setGrades] = useState([])
   const [courses, setCourses] = useState([])
+  const [availability, setAvailability] = useState([])
+  const [latestPrediction, setLatestPrediction] = useState(null)
   const [selectedCourseId, setSelectedCourseId] = useState('')
   const [grade, setGrade] = useState('')
   const [editingGrade, setEditingGrade] = useState(null)
+  const [predictionCourseId, setPredictionCourseId] = useState('')
+  const [predictionResult, setPredictionResult] = useState(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [isLoading, setIsLoading] = useState(true)
+  const [hasLoaded, setHasLoaded] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isRequestingPrediction, setIsRequestingPrediction] = useState(false)
   const [deletingCourseId, setDeletingCourseId] = useState(null)
   const latestWorkspaceLoad = useRef(0)
 
@@ -258,15 +308,20 @@ function StudentWorkspace({ student, onLogout }) {
 
     setIsLoading(true)
     try {
-      const [gradesResponse, coursesResponse] = await Promise.all([
+      const [gradesResponse, coursesResponse, availabilityResponse, latestResponse] = await Promise.all([
         getStudentGrades(savedToken),
         getActiveCourses(savedToken),
+        getPredictionAvailability(savedToken),
+        getLatestPrediction(savedToken),
       ])
       if (loadId !== latestWorkspaceLoad.current) {
         return
       }
       setGrades(gradesResponse.data)
       setCourses(coursesResponse.data)
+      setAvailability(availabilityResponse.data)
+      setLatestPrediction(latestResponse.data)
+      setHasLoaded(true)
     } catch (requestError) {
       if (loadId === latestWorkspaceLoad.current) {
         showRequestError(requestError)
@@ -358,28 +413,39 @@ function StudentWorkspace({ student, onLogout }) {
     }
   }
 
+  async function submitPrediction(event) {
+    event.preventDefault()
+    setError('')
+    setNotice('')
+    setPredictionResult(null)
+    setIsRequestingPrediction(true)
+
+    try {
+      const response = await requestPrediction(token(), Number(predictionCourseId))
+      const result = response.data
+      setPredictionResult(result)
+      if (result.status === 'success') {
+        setNotice('Prediction saved to your history.')
+      }
+      await loadWorkspace()
+    } catch (requestError) {
+      showRequestError(requestError)
+    } finally {
+      setIsRequestingPrediction(false)
+    }
+  }
+
+  const selectedPredictionAvailability = availability.find(
+    (item) => item.course.id === Number(predictionCourseId),
+  )
+
   if (!student) {
     return <Navigate to="/login" replace />
   }
 
-  function logout() {
-    onLogout()
-    navigate('/login', { replace: true, state: { notice: 'You have logged out.' } })
-  }
-
   return (
     <>
-      <nav className="navbar navbar-expand-sm bg-body-tertiary border-bottom">
-        <div className="container">
-          <Link className="navbar-brand" to="/workspace">Course Grade Prediction</Link>
-          <div className="d-flex align-items-center gap-3">
-            <span className="text-body-secondary">Signed in as {student.username}</span>
-            <button className="btn btn-outline-secondary btn-sm" onClick={logout} type="button">
-              Log out
-            </button>
-          </div>
-        </div>
-      </nav>
+      <StudentNavigation student={student} onLogout={onLogout} />
       <main className="container py-5">
         <h1 className="mb-4">Student workspace</h1>
         {error && <div className="alert alert-danger" role="alert">{error}</div>}
@@ -457,7 +523,7 @@ function StudentWorkspace({ student, onLogout }) {
             <h2 className="h4" id="grades-heading">Your grades</h2>
             {isLoading ? (
               <p className="text-body-secondary">Loading grades…</p>
-            ) : grades.length === 0 ? (
+            ) : !hasLoaded ? null : grades.length === 0 ? (
               <p className="text-body-secondary">You have not added any grades yet.</p>
             ) : (
               <div className="table-responsive">
@@ -510,6 +576,185 @@ function StudentWorkspace({ student, onLogout }) {
             )}
           </section>
         </div>
+        <section className="mt-5" aria-labelledby="prediction-heading">
+          <div className="card">
+            <div className="card-body">
+              <h2 className="h4 card-title" id="prediction-heading">Course prediction</h2>
+              <p className="text-body-secondary">
+                Choose an active course to check its current availability and request a prediction.
+              </p>
+              <form className="row g-3 align-items-end" onSubmit={submitPrediction}>
+                <div className="col-md-8">
+                  <label className="form-label" htmlFor="prediction-course">Course</label>
+                  <select
+                    className="form-select"
+                    id="prediction-course"
+                    onChange={(event) => {
+                      setPredictionCourseId(event.target.value)
+                      setPredictionResult(null)
+                    }}
+                    required
+                    value={predictionCourseId}
+                  >
+                    <option value="">Choose an active course</option>
+                    {availability.map((item) => (
+                      <option key={item.course.id} value={item.course.id}>
+                        {item.course.code} — {item.course.name} ({item.is_available ? 'Available' : 'Needs more data'}{item.has_actual_grade ? ', actual grade recorded' : ''})
+                      </option>
+                    ))}
+                  </select>
+                  {selectedPredictionAvailability && (
+                    <div className="form-text">
+                      {selectedPredictionAvailability.is_available
+                        ? 'A prediction is currently available. The request will check again before saving.'
+                        : 'This course does not currently have enough matching data. You can still request it to see the exact requirement.'}
+                    </div>
+                  )}
+                </div>
+                <div className="col-md-4">
+                  <button
+                    className="btn btn-primary"
+                    disabled={isRequestingPrediction}
+                    type="submit"
+                  >
+                    {isRequestingPrediction ? 'Requesting…' : 'Request prediction'}
+                  </button>
+                </div>
+              </form>
+
+              {predictionResult?.status === 'success' && (
+                <div className="alert alert-success mt-4 mb-0" role="status">
+                  <h3 className="h5">Prediction for {predictionResult.course.code}</h3>
+                  <dl className="row mb-0">
+                    <dt className="col-sm-5">KNN predicted grade</dt>
+                    <dd className="col-sm-7">{formatGrade(predictionResult.predicted_grade)}</dd>
+                    <dt className="col-sm-5">Course average (separate baseline)</dt>
+                    <dd className="col-sm-7">{formatGrade(predictionResult.course_average)}</dd>
+                    <dt className="col-sm-5">Neighbors used</dt>
+                    <dd className="col-sm-7">{predictionResult.neighbor_count} (k = {predictionResult.k})</dd>
+                    <dt className="col-sm-5">Minimum shared courses required</dt>
+                    <dd className="col-sm-7">{predictionResult.minimum_common_courses}</dd>
+                  </dl>
+                </div>
+              )}
+              {predictionResult?.status === 'insufficient_data' && (
+                <div className="alert alert-warning mt-4 mb-0" role="status">
+                  <h3 className="h5">Prediction is not available yet</h3>
+                  <p className="mb-2">{predictionResult.message}</p>
+                  {predictionResult.details.found != null && (
+                    <p className="mb-2">
+                      Available now: {predictionResult.details.found}; required: {predictionResult.details.required}.
+                    </p>
+                  )}
+                  <p className="mb-0">
+                    Course average (separate baseline): {formatGrade(predictionResult.course_average)}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+        {latestPrediction && (
+          <section className="mt-4" aria-labelledby="latest-prediction-heading">
+            <h2 className="h4" id="latest-prediction-heading">Latest saved prediction</h2>
+            <div className="card">
+              <div className="card-body">
+                <strong>{latestPrediction.course.code} — {latestPrediction.course.name}</strong>
+                <dl className="row mb-0 mt-2">
+                  <dt className="col-sm-4">Predicted grade</dt>
+                  <dd className="col-sm-8">{formatGrade(latestPrediction.predicted_grade)}</dd>
+                  <dt className="col-sm-4">Actual grade</dt>
+                  <dd className="col-sm-8">{latestPrediction.actual_grade ?? 'Not recorded'}</dd>
+                  <dt className="col-sm-4">Difference (predicted − actual)</dt>
+                  <dd className="col-sm-8">{formatDifference(latestPrediction.difference)}</dd>
+                  <dt className="col-sm-4">Saved</dt>
+                  <dd className="col-sm-8">{formatDate(latestPrediction.created_at)}</dd>
+                </dl>
+              </div>
+            </div>
+          </section>
+        )}
+      </main>
+    </>
+  )
+}
+
+function PredictionHistoryPage({ student, onLogout }) {
+  const navigate = useNavigate()
+  const [history, setHistory] = useState([])
+  const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    if (!student) {
+      return
+    }
+
+    const savedToken = localStorage.getItem(TOKEN_KEY)
+    if (!savedToken) {
+      onLogout()
+      return
+    }
+
+    getPredictionHistory(savedToken)
+      .then((response) => setHistory(response.data))
+      .catch((requestError) => {
+        if (hasInvalidSession(requestError)) {
+          onLogout()
+          navigate('/login', {
+            replace: true,
+            state: { error: apiErrorMessage(requestError) },
+          })
+          return
+        }
+        setError(apiErrorMessage(requestError))
+      })
+      .finally(() => setIsLoading(false))
+  }, [student])
+
+  if (!student) {
+    return <Navigate to="/login" replace />
+  }
+
+  return (
+    <>
+      <StudentNavigation student={student} onLogout={onLogout} />
+      <main className="container py-5">
+        <h1 className="mb-4">Prediction history</h1>
+        {error && <div className="alert alert-danger" role="alert">{error}</div>}
+        {isLoading ? (
+          <p className="text-body-secondary">Loading prediction history…</p>
+        ) : error ? null : history.length === 0 ? (
+          <p className="text-body-secondary">You do not have any saved predictions yet.</p>
+        ) : (
+          <div className="table-responsive">
+            <table className="table align-middle">
+              <thead>
+                <tr>
+                  <th scope="col">Course</th>
+                  <th scope="col">Predicted grade</th>
+                  <th scope="col">Actual grade</th>
+                  <th scope="col">Difference (predicted − actual)</th>
+                  <th scope="col">Saved</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <strong>{item.course.code}</strong><br />
+                      <span className="text-body-secondary">{item.course.name}</span>
+                    </td>
+                    <td>{formatGrade(item.predicted_grade)}</td>
+                    <td>{item.actual_grade ?? 'Not recorded'}</td>
+                    <td>{formatDifference(item.difference)}</td>
+                    <td>{formatDate(item.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </main>
     </>
   )
@@ -579,6 +824,7 @@ function Application() {
       />
       <Route path="/register" element={<RegistrationPage student={student} />} />
       <Route path="/workspace" element={<StudentWorkspace student={student} onLogout={logout} />} />
+      <Route path="/history" element={<PredictionHistoryPage student={student} onLogout={logout} />} />
       <Route path="*" element={<Navigate to={student ? '/workspace' : '/login'} replace />} />
     </Routes>
   )
