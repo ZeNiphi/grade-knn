@@ -20,6 +20,7 @@ import api, {
   getAdminSummary,
   getHistoricalStudent,
   getHistoricalStudents,
+  getKnnSetting,
   deleteStudentGrade,
   getActiveCourses,
   getCurrentUser,
@@ -34,6 +35,7 @@ import api, {
   setAdminCourseActive,
   setHistoricalStudentActive,
   updateAdminCourse,
+  updateKnnSetting,
 } from './api.js'
 
 const TOKEN_KEY = 'course-grade-prediction-token'
@@ -797,6 +799,7 @@ function AdminNavigation({ student, onLogout }) {
           <Link className="link-secondary" to="/admin/courses">Courses</Link>
           <Link className="link-secondary" to="/admin/historical-students">Historical profiles</Link>
           <Link className="link-secondary" to="/admin/students">Students</Link>
+          <Link className="link-secondary" to="/admin/settings">KNN settings</Link>
           <span className="text-body-secondary">Admin: {student.username}</span>
           <button className="btn btn-outline-secondary btn-sm" onClick={logout} type="button">
             Log out
@@ -1448,6 +1451,111 @@ function RegisteredStudentDetails({ managedStudent }) {
   )
 }
 
+function KnnSettingsPage({ student, onLogout }) {
+  const navigate = useNavigate()
+  const [currentK, setCurrentK] = useState(null)
+  const [value, setValue] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+
+  function token() {
+    return localStorage.getItem(TOKEN_KEY)
+  }
+
+  function handleRequestError(requestError) {
+    if (hasInvalidSession(requestError)) {
+      onLogout()
+      navigate('/login', {
+        replace: true,
+        state: { error: apiErrorMessage(requestError) },
+      })
+      return
+    }
+    setError(apiErrorMessage(requestError))
+  }
+
+  useEffect(() => {
+    if (student?.role !== 'admin') {
+      return
+    }
+
+    getKnnSetting(token())
+      .then((response) => {
+        setCurrentK(response.data.k)
+        setValue(String(response.data.k))
+      })
+      .catch(handleRequestError)
+  }, [student])
+
+  async function saveSetting(event) {
+    event.preventDefault()
+    setError('')
+    setNotice('')
+    setIsSaving(true)
+    try {
+      const parsedValue = Number(value)
+      const response = await updateKnnSetting(
+        token(),
+        Number.isFinite(parsedValue) ? parsedValue : value,
+      )
+      setCurrentK(response.data.k)
+      setValue(String(response.data.k))
+      setNotice(`KNN setting saved: k = ${response.data.k}.`)
+    } catch (requestError) {
+      handleRequestError(requestError)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (!student) {
+    return <Navigate to="/login" replace />
+  }
+  if (student.role !== 'admin') {
+    return <Navigate to="/workspace" replace />
+  }
+
+  return (
+    <>
+      <AdminNavigation student={student} onLogout={onLogout} />
+      <main className="container py-5">
+        <h1 className="mb-4">KNN settings</h1>
+        {error && <div className="alert alert-danger" role="alert">{error}</div>}
+        {notice && <div className="alert alert-success" role="status">{notice}</div>}
+        <div className="card col-md-8 col-lg-6">
+          <div className="card-body">
+            {currentK == null ? (
+              error ? null : <p className="text-body-secondary mb-0">Loading current setting…</p>
+            ) : (
+              <>
+                <p className="mb-3">Current number of neighbors: <strong>{currentK}</strong></p>
+                <form onSubmit={saveSetting}>
+                  <div className="mb-3">
+                    <label className="form-label" htmlFor="knn-k">Number of neighbors (k)</label>
+                    <input
+                      className="form-control"
+                      id="knn-k"
+                      inputMode="numeric"
+                      onChange={(event) => setValue(event.target.value)}
+                      required
+                      value={value}
+                    />
+                    <div className="form-text">The server validates that k is a positive integer.</div>
+                  </div>
+                  <button className="btn btn-primary" disabled={isSaving} type="submit">
+                    {isSaving ? 'Saving…' : 'Save setting'}
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
+        </div>
+      </main>
+    </>
+  )
+}
+
 function Application() {
   const [student, setStudent] = useState(null)
   const [sessionError, setSessionError] = useState('')
@@ -1510,6 +1618,7 @@ function Application() {
       <Route path="/admin/courses" element={<AdminCoursesPage student={student} onLogout={logout} />} />
       <Route path="/admin/historical-students" element={<AdminHistoricalStudentsPage student={student} onLogout={logout} />} />
       <Route path="/admin/students" element={<AdminStudentsPage student={student} onLogout={logout} />} />
+      <Route path="/admin/settings" element={<KnnSettingsPage student={student} onLogout={logout} />} />
       <Route path="*" element={<Navigate to={student ? homePath(student) : '/login'} replace />} />
     </Routes>
   )

@@ -50,6 +50,14 @@ export function getAdminSummary(token) {
   return api.get('/admin/summary', authorization(token))
 }
 
+export function getKnnSetting(token) {
+  return api.get('/admin/knn-setting', authorization(token))
+}
+
+export function updateKnnSetting(token, k) {
+  return api.put('/admin/knn-setting', { k }, authorization(token))
+}
+
 export function getAdminCourses(token) {
   return api.get('/admin/courses', authorization(token))
 }
