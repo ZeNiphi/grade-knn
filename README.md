@@ -1,8 +1,10 @@
-# How to run
+# Course Grade Prediction
+
+## How to run
 
 Requires Python 3.12 and Node.js 22.12 or newer. Run these commands in PowerShell from the repository root.
 
-## Install once
+### Install once
 
 python refers to the Python interpreter installed on your computer.
 
@@ -15,7 +17,7 @@ npm.cmd ci
 cd ..
 ```
 
-## Start the backend
+### Start the backend
 
 In the first terminal:
 
@@ -26,7 +28,7 @@ The backend listens on port 8000. Its API address is http://127.0.0.1:8000.
 python -m uvicorn app.main:create_app --factory --app-dir backend --host 127.0.0.1 --port 8000 --reload
 ```
 
-## Start the frontend
+### Start the frontend
 
 In a second terminal:
 
