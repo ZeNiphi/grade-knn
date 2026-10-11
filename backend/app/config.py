@@ -24,6 +24,7 @@ class Settings:
     jwt_expiry_minutes: int = 60
     initial_admin_username: str = INITIAL_ADMIN_USERNAME
     initial_admin_password: str = INITIAL_ADMIN_PASSWORD
+    initial_admin_password_configured: bool = False
 
 
 def load_settings() -> Settings:
@@ -78,5 +79,6 @@ def load_settings() -> Settings:
         jwt_algorithm=jwt_algorithm,
         jwt_expiry_minutes=jwt_expiry_minutes,
         initial_admin_username=INITIAL_ADMIN_USERNAME,
-        initial_admin_password=INITIAL_ADMIN_PASSWORD,
+        initial_admin_password=values.get("INITIAL_ADMIN_PASSWORD", INITIAL_ADMIN_PASSWORD),
+        initial_admin_password_configured="INITIAL_ADMIN_PASSWORD" in values,
     )
