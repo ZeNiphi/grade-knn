@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .auth import require_admin, require_student
 from .database import get_db
 from .models import Course, HistoricalGrade, User, UserGrade
-from .schemas import CourseResponse, CourseWrite
+from .schemas import AdminCourseResponse, CourseResponse, CourseWrite
 
 router = APIRouter(tags=["courses"])
 
@@ -80,13 +80,49 @@ def list_active_courses(
     return [course_response(course) for course in courses]
 
 
-@router.get("/admin/courses", response_model=list[CourseResponse])
+@router.get("/admin/courses", response_model=list[AdminCourseResponse])
 def list_courses(
     db: Annotated[Session, Depends(get_db)],
     _admin: Annotated[User, Depends(require_admin)],
-) -> list[CourseResponse]:
-    courses = db.scalars(select(Course).order_by(Course.code)).all()
-    return [course_response(course) for course in courses]
+) -> list[AdminCourseResponse]:
+    student_counts = (
+        select(
+            UserGrade.course_id,
+            func.count(UserGrade.id).label("grade_count"),
+        )
+        .group_by(UserGrade.course_id)
+        .subquery()
+    )
+    historical_counts = (
+        select(
+            HistoricalGrade.course_id,
+            func.count(HistoricalGrade.id).label("grade_count"),
+        )
+        .group_by(HistoricalGrade.course_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(
+            Course,
+            (
+                func.coalesce(student_counts.c.grade_count, 0)
+                + func.coalesce(historical_counts.c.grade_count, 0)
+            ).label("grade_count"),
+        )
+        .outerjoin(student_counts, student_counts.c.course_id == Course.id)
+        .outerjoin(historical_counts, historical_counts.c.course_id == Course.id)
+        .order_by(Course.code)
+    ).all()
+    return [
+        AdminCourseResponse(
+            id=course.id,
+            code=course.code,
+            name=course.name,
+            is_active=course.is_active,
+            grade_count=grade_count,
+        )
+        for course, grade_count in rows
+    ]
 
 
 @router.post("/admin/courses", response_model=CourseResponse, status_code=201)

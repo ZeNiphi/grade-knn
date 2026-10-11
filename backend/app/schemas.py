@@ -99,6 +99,10 @@ class CourseResponse(BaseModel):
     is_active: bool
 
 
+class AdminCourseResponse(CourseResponse):
+    grade_count: int
+
+
 class GradeWrite(BaseModel):
     """A grade submitted for a course."""
 

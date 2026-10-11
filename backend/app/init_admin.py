@@ -1,6 +1,7 @@
 """Create the configured initial Admin account without changing existing users."""
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from .config import Settings, load_settings
@@ -18,22 +19,23 @@ def setup_initial_admin(settings: Settings, sessions: sessionmaker[Session]) -> 
             password=settings.initial_admin_password,
         )
     except ValueError:
-        raise ValueError("INITIAL_ADMIN_USERNAME and INITIAL_ADMIN_PASSWORD are invalid") from None
+        raise ValueError("Initial Admin credentials are invalid") from None
 
     with sessions.begin() as session:
-        existing = session.scalar(
-            select(User).where(User.username == credentials.username)
-        )
-        if existing is not None:
-            return "existing_admin" if existing.role == ADMIN_ROLE else "username_taken"
-        session.add(
-            User(
+        result = session.execute(
+            sqlite_insert(User)
+            .values(
                 username=credentials.username,
                 password_hash=hash_password(credentials.password),
                 role=ADMIN_ROLE,
+                is_active=True,
             )
+            .on_conflict_do_nothing(index_elements=[User.username])
         )
-    return "created"
+        if result.rowcount == 1:
+            return "created"
+        existing = session.scalar(select(User).where(User.username == credentials.username))
+        return "existing_admin" if existing.role == ADMIN_ROLE else "username_taken"
 
 
 def main() -> None:

@@ -10,7 +10,11 @@ from .admin_dashboard import get_current_k
 from .auth import require_student
 from .courses import course_response, get_course_or_404
 from .database import get_db
-from .knn import KNNPredictionResult, calculate_knn_prediction
+from .knn import (
+    KNNPredictionResult,
+    calculate_knn_prediction,
+    calculate_prediction_availability,
+)
 from .models import Course, Prediction, User, UserGrade
 from .schemas import (
     PredictionAvailabilityResponse,
@@ -99,12 +103,13 @@ def list_prediction_availability(
     grade_course_ids = set(
         db.scalars(select(UserGrade.course_id).where(UserGrade.user_id == student.id)).all()
     )
+    ready_by_course = calculate_prediction_availability(
+        db, student, [course.id for course in courses], k
+    )
     return [
         PredictionAvailabilityResponse(
             course=course_response(course),
-            is_available=(
-                calculate_knn_prediction(db, student, course.id, k).status == "success"
-            ),
+            is_available=ready_by_course[course.id],
             has_actual_grade=course.id in grade_course_ids,
         )
         for course in courses

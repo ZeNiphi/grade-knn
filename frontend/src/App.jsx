@@ -37,6 +37,7 @@ import api, {
   updateAdminCourse,
   updateKnnSetting,
 } from './api.js'
+import './App.css'
 
 const TOKEN_KEY = 'course-grade-prediction-token'
 
@@ -58,6 +59,28 @@ function formatDifference(value) {
 function formatDate(value) {
   const utcValue = /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`
   return new Date(utcValue).toLocaleString()
+}
+
+function showEnglishValidationError(event, setError) {
+  event.preventDefault()
+  const field = event.target
+  if (event.currentTarget.querySelector(':invalid') !== field) {
+    return
+  }
+  const label = event.currentTarget.querySelector(`label[for="${field.id}"]`)
+  const name = label?.textContent?.trim() || 'This field'
+  let message = `${name} is invalid.`
+  if (field.validity.valueMissing) {
+    message = `${name} is required.`
+  } else if (field.validity.tooShort) {
+    message = `${name} must have at least ${field.minLength} characters.`
+  } else if (field.validity.patternMismatch) {
+    message = `${name} can contain only letters, numbers, and underscores.`
+  } else if (name === 'Grade') {
+    message = 'Grade must be an integer from 0 to 100.'
+  }
+  setError(message)
+  field.focus()
 }
 
 function PublicPage({ children }) {
@@ -116,7 +139,7 @@ function LoginPage({ student, sessionError, onLogin }) {
       {(error || sessionError) && (
         <div className="alert alert-danger" role="alert">{error || sessionError}</div>
       )}
-      <form onSubmit={submitLogin}>
+      <form onInvalidCapture={(event) => showEnglishValidationError(event, setError)} onSubmit={submitLogin}>
         <div className="mb-3">
           <label className="form-label" htmlFor="login-username">Username</label>
           <input
@@ -195,7 +218,7 @@ function RegistrationPage({ student }) {
         Registration creates a Student account only.
       </p>
       {error && <div className="alert alert-danger" role="alert">{error}</div>}
-      <form onSubmit={submitRegistration}>
+      <form onInvalidCapture={(event) => showEnglishValidationError(event, setError)} onSubmit={submitRegistration}>
         <div className="mb-3">
           <label className="form-label" htmlFor="registration-username">Username</label>
           <input
@@ -293,7 +316,7 @@ function StudentWorkspace({ student, onLogout }) {
   const latestWorkspaceLoad = useRef(0)
 
   function token() {
-    return localStorage.getItem(TOKEN_KEY)
+    return sessionStorage.getItem(TOKEN_KEY)
   }
 
   function showRequestError(requestError) {
@@ -475,7 +498,7 @@ function StudentWorkspace({ student, onLogout }) {
                 <h2 className="h4 card-title" id="grade-form-heading">
                   {editingGrade ? 'Update grade' : 'Add grade'}
                 </h2>
-                <form onSubmit={submitGrade}>
+                <form onInvalidCapture={(event) => showEnglishValidationError(event, setError)} onSubmit={submitGrade}>
                   <div className="mb-3">
                     <label className="form-label" htmlFor="grade-course">Course</label>
                     <select
@@ -601,7 +624,7 @@ function StudentWorkspace({ student, onLogout }) {
               <p className="text-body-secondary">
                 Choose an active course to check its current availability and request a prediction.
               </p>
-              <form className="row g-3 align-items-end" onSubmit={submitPrediction}>
+              <form className="row g-3 align-items-end" onInvalidCapture={(event) => showEnglishValidationError(event, setError)} onSubmit={submitPrediction}>
                 <div className="col-md-8">
                   <label className="form-label" htmlFor="prediction-course">Course</label>
                   <select
@@ -708,7 +731,7 @@ function PredictionHistoryPage({ student, onLogout }) {
       return
     }
 
-    const savedToken = localStorage.getItem(TOKEN_KEY)
+    const savedToken = sessionStorage.getItem(TOKEN_KEY)
     if (!savedToken) {
       onLogout()
       return
@@ -820,7 +843,7 @@ function AdminSummaryPage({ student, onLogout }) {
       return
     }
 
-    const token = localStorage.getItem(TOKEN_KEY)
+    const token = sessionStorage.getItem(TOKEN_KEY)
     if (!token) {
       onLogout()
       return
@@ -897,7 +920,7 @@ function AdminCoursesPage({ student, onLogout }) {
   const [isSaving, setIsSaving] = useState(false)
 
   function token() {
-    return localStorage.getItem(TOKEN_KEY)
+    return sessionStorage.getItem(TOKEN_KEY)
   }
 
   function handleRequestError(requestError) {
@@ -1032,16 +1055,16 @@ function AdminCoursesPage({ student, onLogout }) {
       <AdminNavigation student={student} onLogout={onLogout} />
       <main className="container py-5">
         <h1 className="mb-4">Course management</h1>
-        {error && <div className="alert alert-danger" role="alert">{error}</div>}
-        {notice && <div className="alert alert-success" role="status">{notice}</div>}
         <div className="row g-4">
           <section className="col-lg-4" aria-labelledby="course-form-heading">
-            <div className="card">
+            <div className="card course-editor">
               <div className="card-body">
                 <h2 className="h4 card-title" id="course-form-heading">
                   {editingCourse ? 'Edit course' : 'Add course'}
                 </h2>
-                <form onSubmit={submitCourse}>
+                {error && <div className="alert alert-danger" role="alert">{error}</div>}
+                {notice && <div className="alert alert-success" role="status">{notice}</div>}
+                <form onInvalidCapture={(event) => showEnglishValidationError(event, setError)} onSubmit={submitCourse}>
                   <div className="mb-3">
                     <label className="form-label" htmlFor="course-code">Course code</label>
                     <input className="form-control" id="course-code" maxLength="20" onChange={(event) => setCode(event.target.value)} required value={code} />
@@ -1070,12 +1093,13 @@ function AdminCoursesPage({ student, onLogout }) {
               <div className="table-responsive">
                 <table className="table align-middle">
                   <thead>
-                    <tr><th scope="col">Course</th><th scope="col">Status</th><th scope="col"><span className="visually-hidden">Actions</span></th></tr>
+                    <tr><th scope="col">Course</th><th scope="col">Grades <span className="d-block fw-normal small text-body-secondary">Student + historical</span></th><th scope="col">Status</th><th scope="col"><span className="visually-hidden">Actions</span></th></tr>
                   </thead>
                   <tbody>
                     {courses.map((course) => (
                       <tr key={course.id}>
                         <td><strong>{course.code}</strong><br /><span className="text-body-secondary">{course.name}</span></td>
+                        <td>{course.grade_count}</td>
                         <td>{course.is_active ? <span className="badge text-bg-success">Active</span> : <span className="badge text-bg-secondary">Inactive</span>}</td>
                         <td className="text-end text-nowrap">
                           <button className="btn btn-sm btn-outline-primary me-2" disabled={busyCourseId === course.id} onClick={() => beginEditing(course)} type="button">Edit</button>
@@ -1112,7 +1136,7 @@ function AdminHistoricalStudentsPage({ student, onLogout }) {
   const [busyProfileId, setBusyProfileId] = useState(null)
 
   function token() {
-    return localStorage.getItem(TOKEN_KEY)
+    return sessionStorage.getItem(TOKEN_KEY)
   }
 
   function handleRequestError(requestError) {
@@ -1306,7 +1330,7 @@ function AdminStudentsPage({ student, onLogout }) {
   const [busyStudentId, setBusyStudentId] = useState(null)
 
   function token() {
-    return localStorage.getItem(TOKEN_KEY)
+    return sessionStorage.getItem(TOKEN_KEY)
   }
 
   function handleRequestError(requestError) {
@@ -1460,7 +1484,7 @@ function KnnSettingsPage({ student, onLogout }) {
   const [isSaving, setIsSaving] = useState(false)
 
   function token() {
-    return localStorage.getItem(TOKEN_KEY)
+    return sessionStorage.getItem(TOKEN_KEY)
   }
 
   function handleRequestError(requestError) {
@@ -1530,7 +1554,7 @@ function KnnSettingsPage({ student, onLogout }) {
             ) : (
               <>
                 <p className="mb-3">Current number of neighbors: <strong>{currentK}</strong></p>
-                <form onSubmit={saveSetting}>
+                <form onInvalidCapture={(event) => showEnglishValidationError(event, setError)} onSubmit={saveSetting}>
                   <div className="mb-3">
                     <label className="form-label" htmlFor="knn-k">Number of neighbors (k)</label>
                     <input
@@ -1562,7 +1586,9 @@ function Application() {
   const [isCheckingSession, setIsCheckingSession] = useState(true)
 
   useEffect(() => {
-    const token = localStorage.getItem(TOKEN_KEY)
+    // Older versions shared this token across tabs. Each tab now owns its session.
+    localStorage.removeItem(TOKEN_KEY)
+    const token = sessionStorage.getItem(TOKEN_KEY)
     if (!token) {
       setIsCheckingSession(false)
       return
@@ -1574,7 +1600,7 @@ function Application() {
       })
       .catch((requestError) => {
         if (requestError.response) {
-          localStorage.removeItem(TOKEN_KEY)
+          sessionStorage.removeItem(TOKEN_KEY)
           setSessionError(
             requestError.response.data?.code === 'ACCOUNT_DISABLED'
               ? apiErrorMessage(requestError)
@@ -1590,13 +1616,13 @@ function Application() {
   async function login(token) {
     setSessionError('')
     const response = await getCurrentUser(token)
-    localStorage.setItem(TOKEN_KEY, token)
+    sessionStorage.setItem(TOKEN_KEY, token)
     setStudent(response.data)
     return response.data
   }
 
   function logout() {
-    localStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(TOKEN_KEY)
     setStudent(null)
     setSessionError('')
   }
