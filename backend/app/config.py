@@ -1,6 +1,7 @@
 """Backend configuration: process environment overrides the root .env file."""
 
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -10,6 +11,8 @@ from dotenv import dotenv_values
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 ENV_FILE = BACKEND_DIR.parent / ".env"
 JWT_ALGORITHM = "HS256"
+INITIAL_ADMIN_USERNAME = "admin"
+INITIAL_ADMIN_PASSWORD = "12345678"
 
 
 @dataclass(frozen=True)
@@ -19,8 +22,9 @@ class Settings:
     jwt_secret: str = ""
     jwt_algorithm: str = JWT_ALGORITHM
     jwt_expiry_minutes: int = 60
-    initial_admin_username: str = ""
-    initial_admin_password: str = ""
+    initial_admin_username: str = INITIAL_ADMIN_USERNAME
+    initial_admin_password: str = INITIAL_ADMIN_PASSWORD
+    initial_admin_password_configured: bool = False
 
 
 def load_settings() -> Settings:
@@ -51,9 +55,13 @@ def load_settings() -> Settings:
     ):
         raise ValueError("FRONTEND_ORIGIN must be an HTTP(S) origin without a path")
 
-    jwt_secret = values.get("JWT_SECRET", "")
-    if not jwt_secret or not jwt_secret.strip():
-        raise ValueError("JWT_SECRET must be configured")
+    jwt_secret = values.get("JWT_SECRET")
+    if jwt_secret is None:
+        # A local run works without .env. Tokens issued with this secret expire
+        # when the backend restarts; configure JWT_SECRET to retain them.
+        jwt_secret = secrets.token_urlsafe(32)
+    elif not jwt_secret.strip():
+        raise ValueError("JWT_SECRET must be non-empty")
     jwt_algorithm = values.get("JWT_ALGORITHM", JWT_ALGORITHM)
     if jwt_algorithm != JWT_ALGORITHM:
         raise ValueError(f"JWT_ALGORITHM must be {JWT_ALGORITHM}")
@@ -70,6 +78,7 @@ def load_settings() -> Settings:
         jwt_secret=jwt_secret,
         jwt_algorithm=jwt_algorithm,
         jwt_expiry_minutes=jwt_expiry_minutes,
-        initial_admin_username=values.get("INITIAL_ADMIN_USERNAME", ""),
-        initial_admin_password=values.get("INITIAL_ADMIN_PASSWORD", ""),
+        initial_admin_username=INITIAL_ADMIN_USERNAME,
+        initial_admin_password=values.get("INITIAL_ADMIN_PASSWORD", INITIAL_ADMIN_PASSWORD),
+        initial_admin_password_configured="INITIAL_ADMIN_PASSWORD" in values,
     )

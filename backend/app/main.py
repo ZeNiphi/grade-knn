@@ -16,19 +16,32 @@ from .admin_students import router as admin_students_router
 from .auth import router as auth_router
 from .config import Settings, load_settings
 from .courses import router as courses_router
-from .database import create_sqlite_engine, get_db
+from .database import create_sqlite_engine, get_db, initialize_database
 from .grades import router as grades_router
 from .historical_students import router as historical_students_router
+from .init_admin import setup_initial_admin
 from .predictions import router as predictions_router
+from .seed_data import generate_historical_data
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, initialize_data_on_startup: bool = True
+) -> FastAPI:
     settings = settings or load_settings()
     engine = create_sqlite_engine(settings.database_path)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:
+            if initialize_data_on_startup:
+                initialize_database(engine)
+                result = setup_initial_admin(settings, _app.state.session_factory)
+                if result == "username_taken":
+                    raise RuntimeError(
+                        "Initial Admin was not created: username "
+                        f"'{settings.initial_admin_username}' belongs to a Student."
+                    )
+                generate_historical_data(engine)
             yield
         finally:
             engine.dispose()

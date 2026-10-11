@@ -1,5 +1,6 @@
 # Markdown files
 *.md
+!/README.md
 
 # Tests
 test/

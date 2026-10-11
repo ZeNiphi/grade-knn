@@ -129,6 +129,66 @@ def build_requester_profile(
     )
 
 
+def calculate_prediction_availability(
+    db: Session, requester: User, target_course_ids: list[int], k: int
+) -> dict[int, bool]:
+    """Check all targets with one read of each candidate pool.
+
+    Availability needs only the shared-course and candidate-count rules. Actual
+    prediction requests still calculate distances, neighbors, and the baseline.
+    """
+    requester_rows = db.execute(
+        select(UserGrade.course_id, UserGrade.grade).where(
+            UserGrade.user_id == requester.id
+        )
+    ).all()
+    candidate_rows: dict[tuple[ProfileType, int], list[tuple[int, int]]] = {}
+    for student_id, course_id, grade in db.execute(
+        select(
+            HistoricalGrade.historical_student_id,
+            HistoricalGrade.course_id,
+            HistoricalGrade.grade,
+        )
+        .join(HistoricalStudent)
+        .where(HistoricalStudent.is_active_for_knn.is_(True))
+    ):
+        candidate_rows.setdefault(("historical_student", student_id), []).append(
+            (course_id, grade)
+        )
+    for student_id, course_id, grade in db.execute(
+        select(UserGrade.user_id, UserGrade.course_id, UserGrade.grade)
+        .join(User)
+        .where(
+            User.role == STUDENT_ROLE,
+            User.is_active.is_(True),
+            User.id != requester.id,
+        )
+    ):
+        candidate_rows.setdefault(("registered_student", student_id), []).append(
+            (course_id, grade)
+        )
+
+    availability = {}
+    for target_course_id in target_course_ids:
+        requester_profile = _profile_from_grade_rows(
+            "registered_student", requester.id, requester_rows, target_course_id
+        )
+        if len(requester_profile.input_grades) < MINIMUM_INPUT_GRADES:
+            availability[target_course_id] = False
+            continue
+        eligible_count = 0
+        for (profile_type, profile_id), rows in candidate_rows.items():
+            candidate = _profile_from_grade_rows(
+                profile_type, profile_id, rows, target_course_id
+            )
+            if candidate_is_eligible(requester_profile, candidate) is not None:
+                eligible_count += 1
+                if eligible_count >= k:
+                    break
+        availability[target_course_id] = eligible_count >= k
+    return availability
+
+
 def _build_historical_profile(
     db: Session, historical_student_id: int, target_course_id: int
 ) -> KNNProfile:

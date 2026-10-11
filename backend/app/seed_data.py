@@ -1,7 +1,7 @@
 """Create the deterministic historical dataset used for future KNN comparisons.
 
-Run from ``backend`` with ``python -m app.seed_data``.  The generator is kept
-out of application startup so normal API use never changes historical data.
+Startup creates the dataset when none of its generated profiles exist. Run from
+``backend`` with ``python -m app.seed_data --replace`` to rebuild it explicitly.
 """
 
 from __future__ import annotations
@@ -23,10 +23,15 @@ STUDENT_COUNT = 400
 COURSE_COUNT = 25
 MIN_COURSES_PER_STUDENT = 7
 MAX_COURSES_PER_STUDENT = 15
-GENERATED_KEY_PREFIX = "seed-"
+GENERATED_KEY_PREFIX = "s-"
+LEGACY_KEY_PREFIX = "seed-"
+GENERATED_KEYS = tuple(
+    f"{GENERATED_KEY_PREFIX}{number:04}"
+    for number in range(1, STUDENT_COUNT + 1)
+)
 
 COURSES = tuple(
-    (f"CGP{number:02}", f"Course {number:02}")
+    (f"C{number:02}", f"Course {number:02}")
     for number in range(1, COURSE_COUNT + 1)
 )
 CORE_CODES = tuple(code for code, _name in COURSES[:7])
@@ -61,7 +66,7 @@ def build_dataset(seed: int = SEED) -> dict:
             for code in (*CORE_CODES, *sorted(selected))
         }
         profiles.append({
-            "generated_key": f"{GENERATED_KEY_PREFIX}{index + 1:04}",
+            "generated_key": GENERATED_KEYS[index],
             "grades": grades,
         })
 
@@ -212,22 +217,57 @@ def validate_dataset(dataset: dict) -> dict:
     }
 
 
+def _rename_legacy_identifiers(session: Session) -> None:
+    """Rename only the original generated identifiers, preserving their row IDs."""
+    old_course_codes = {
+        f"CGP{number:02}": f"C{number:02}"
+        for number in range(1, COURSE_COUNT + 1)
+    }
+    old_profile_keys = {
+        f"{LEGACY_KEY_PREFIX}{number:04}": f"{GENERATED_KEY_PREFIX}{number:04}"
+        for number in range(1, STUDENT_COUNT + 1)
+    }
+    legacy_courses = session.scalars(
+        select(Course).where(Course.code.in_(old_course_codes))
+    ).all()
+    legacy_profiles = session.scalars(
+        select(HistoricalStudent).where(
+            HistoricalStudent.generated_key.in_(old_profile_keys)
+        )
+    ).all()
+    if not legacy_courses and not legacy_profiles:
+        return
+
+    target_codes = {old_course_codes[course.code] for course in legacy_courses}
+    if session.scalar(select(Course.id).where(Course.code.in_(target_codes)).limit(1)):
+        raise ValueError("Cannot rename generated courses: a C01-C25 code is already used.")
+    target_keys = {old_profile_keys[profile.generated_key] for profile in legacy_profiles}
+    if session.scalar(
+        select(HistoricalStudent.id)
+        .where(HistoricalStudent.generated_key.in_(target_keys))
+        .limit(1)
+    ):
+        raise ValueError("Cannot rename generated profiles: an s-0001-s-0400 key is already used.")
+
+    for course in legacy_courses:
+        course.code = old_course_codes[course.code]
+    for profile in legacy_profiles:
+        profile.generated_key = old_profile_keys[profile.generated_key]
+
+
 def generate_historical_data(engine: Engine, *, replace: bool = False) -> dict:
     """Persist validated generated data, leaving all non-generated records untouched."""
     dataset = build_dataset()
     report = validate_dataset(dataset)
     initialize_database(engine)
 
-    with Session(engine) as session:
+    with Session(engine) as session, session.begin():
+        _rename_legacy_identifiers(session)
+        generated_filter = HistoricalStudent.generated_key.in_(GENERATED_KEYS)
         existing = session.scalar(
-            select(HistoricalStudent.id).where(
-                HistoricalStudent.generated_key.like(f"{GENERATED_KEY_PREFIX}%")
-            ).limit(1)
+            select(HistoricalStudent.id).where(generated_filter).limit(1)
         )
         if existing is not None and not replace:
-            generated_filter = HistoricalStudent.generated_key.like(
-                f"{GENERATED_KEY_PREFIX}%"
-            )
             persisted_students = session.scalar(
                 select(func.count(HistoricalStudent.id)).where(generated_filter)
             )
@@ -248,13 +288,8 @@ def generate_historical_data(engine: Engine, *, replace: bool = False) -> dict:
                 "historical_grades": persisted_grades,
             }
 
-    with Session(engine) as session, session.begin():
         if replace:
-            session.execute(
-                delete(HistoricalStudent).where(
-                    HistoricalStudent.generated_key.like(f"{GENERATED_KEY_PREFIX}%")
-                )
-            )
+            session.execute(delete(HistoricalStudent).where(generated_filter))
 
         existing_courses = {
             course.code: course
